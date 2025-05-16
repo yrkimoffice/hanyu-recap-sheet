@@ -35,13 +35,13 @@ pip install -r requirements.txt
 ### 3. 최초 실행 시 인증 진행
 
 ```bash
-python hanyu_recap_sheet.py
+python3 hanyu_recap_sheet.py
 ```
 
 ### 4. 수동 문서 ID 사용 시
 
 ```bash
-python hanyu_recap_sheet.py --doc-id <Google Docs 문서 ID>
+python3 hanyu_recap_sheet.py --doc-id <Google Docs 문서 ID>
 ```
 
 ---
