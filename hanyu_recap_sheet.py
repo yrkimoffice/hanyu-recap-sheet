@@ -96,21 +96,24 @@ class HanyuRecapSheet:
             except Exception as e:
                 print(f"[번역 실패] {text} → {e}")
                 return ""
-
+    
     def extract_lines_from_doc(self):
         doc = self.docs_service.documents().get(documentId=self.doc_id).execute()
         self.doc_title = doc.get('title')
         lines = []
+
         for content in doc.get('body').get('content', []):
             if 'paragraph' in content:
+                paragraph_text = ''
                 for el in content['paragraph'].get('elements', []):
                     txt = el.get('textRun', {}).get('content', '')
-                    if txt.strip():
-                        cleaned = re.sub(r'\(.*?\)', '', txt).strip()
-                        pinyin_flat = self.generate_pinyin(cleaned)
-                        translated = self.translate(cleaned)
-                        if cleaned and not cleaned.startswith(('#', '//')):
-                            lines.append([translated, cleaned, pinyin_flat])
+                    paragraph_text += txt
+
+                cleaned = re.sub(r'\(.*?\)', '', paragraph_text).strip()
+                if cleaned and not cleaned.startswith(('#', '//')):
+                    pinyin_flat = self.generate_pinyin(cleaned)
+                    translated = self.translate(cleaned)
+                    lines.append([translated, cleaned, pinyin_flat])
         return lines
 
     def write_to_sheet(self, sheet_id, sheet_name, lines):
