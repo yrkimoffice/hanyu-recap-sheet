@@ -14,6 +14,7 @@ from googleapiclient.discovery import build
 from pypinyin import pinyin, Style
 from deep_translator import GoogleTranslator
 from time import time as now_time
+from datetime import datetime
 
 SCOPES = [
     'https://www.googleapis.com/auth/drive',
@@ -216,7 +217,34 @@ class HanyuRecapSheet:
         print(f"\n✅ 랜덤 복습 시트가 생성되었습니다! 총 {len(all_rows)}개 문장")
         print(f"📊 Sheet: https://docs.google.com/spreadsheets/d/{sheet_id}/edit")
 
-    
+    def create_review_from_sheet(self, spreadsheet_id, sample_count=None, source_sheet_name="Review"):
+        try:
+            result = self.sheets_service.spreadsheets().values().get(
+                spreadsheetId=spreadsheet_id,
+                range=f"{source_sheet_name}!A2:C"
+            ).execute()
+            rows = result.get("values", [])
+        except Exception as e:
+            print(f"❌ 시트를 불러오는 데 실패했습니다: {e}")
+            return
+
+        if not rows:
+            print("⚠️ 해당 시트에 복습할 문장이 없습니다.")
+            return
+
+        random.shuffle(rows)
+        if sample_count:
+            rows = rows[:sample_count]
+
+        today = datetime.now().strftime("%m%d")
+        review_title = f"review_from_sheet_{today}"
+        sheet_id, sheet_name, sheet_gid = self.create_sheet(review_title)
+        self.write_to_sheet(sheet_id, sheet_name, rows)
+        self.resize_columns(sheet_id, sheet_gid)
+
+        print(f"\n✅ 랜덤 복습 시트가 생성되었습니다! 총 {len(rows)}개 문장")
+        print(f"📊 Sheet: https://docs.google.com/spreadsheets/d/{sheet_id}/edit")
+
     
     def save_meta(self, sheet_id, sheet_title):
         with open('meta.json', 'w') as f:
