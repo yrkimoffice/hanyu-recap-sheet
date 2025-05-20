@@ -4,7 +4,6 @@ import json
 import re
 import jieba
 import jieba.posseg as pseg
-from time import time
 from datetime import datetime
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -12,7 +11,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from pypinyin import pinyin, Style
 from deep_translator import GoogleTranslator
-
+from time import time
 
 SCOPES = [
     'https://www.googleapis.com/auth/drive',
@@ -54,14 +53,22 @@ class HanyuRecapSheet:
         return folder.get('id')
 
     def create_sheet(self, title):
-        sheet = self.sheets_service.spreadsheets().create(body={'properties': {'title': title}}).execute()
+        sheet = self.sheets_service.spreadsheets().create(
+            body={
+                'properties': {'title': title},
+                'sheets': [{'properties': {'title': 'Review'}}]
+            }
+        ).execute()
+    
         sheet_id = sheet['spreadsheetId']
-        sheet_metadata = self.sheets_service.spreadsheets().get(spreadsheetId=sheet_id).execute()
-        sheet_info = sheet_metadata['sheets'][0]['properties']
-        sheet_name = sheet_info['title']
-        sheet_gid = sheet_info['sheetId']
+        sheet_name = 'Review'
+        sheet_gid = sheet['sheets'][0]['properties']['sheetId']
 
-        self.drive_service.files().update(fileId=sheet_id, addParents=self.folder_id, fields='id, parents').execute()
+        self.drive_service.files().update(
+            fileId=sheet_id,
+            addParents=self.folder_id,
+            fields='id, parents'
+        ).execute()
 
         self.sheets_service.spreadsheets().values().update(
             spreadsheetId=sheet_id,
@@ -71,6 +78,7 @@ class HanyuRecapSheet:
         ).execute()
 
         return sheet_id, sheet_name, sheet_gid
+
 
     def resize_columns(self, spreadsheet_id, sheet_gid):
         requests = [
@@ -96,7 +104,7 @@ class HanyuRecapSheet:
             except Exception as e:
                 print(f"[번역 실패] {text} → {e}")
                 return ""
-    
+
     def extract_lines_from_doc(self):
         doc = self.docs_service.documents().get(documentId=self.doc_id).execute()
         self.doc_title = doc.get('title')
@@ -150,45 +158,77 @@ class HanyuRecapSheet:
                 "sheet_title": sheet_title
             }, f, indent=2)
 
+    def regenerate_pinyin_only(self, sheet_id, sheet_name="Review"):
+        result = self.sheets_service.spreadsheets().values().get(
+            spreadsheetId=sheet_id,
+            range=f"{sheet_name}!B2:B"
+        ).execute()
+        chinese_lines = result.get('values', [])
+
+        updates = []
+        for row in chinese_lines:
+            zh_text = row[0] if row else ''
+            pinyin_val = self.generate_pinyin(zh_text)
+            updates.append([pinyin_val])
+
+        self.sheets_service.spreadsheets().values().update(
+            spreadsheetId=sheet_id,
+            range=f"{sheet_name}!C2:C",
+            valueInputOption='RAW',
+            body={"values": updates}
+        ).execute()
+
+        print(f"✅ 병음만 {len(updates)}줄 업데이트 완료")
 
     def run(self):
-            start = time()
-            if not self.doc_id:
-                doc_title = f"{datetime.now().strftime('%m/%d')} - 중국어 정리"
-                doc = self.docs_service.documents().create(body={'title': doc_title}).execute()
-                self.doc_id = doc.get('documentId')
-                self.doc_title = doc_title
-            else:
-                doc = self.docs_service.documents().get(documentId=self.doc_id).execute()
-                self.doc_title = doc.get('title')
+        start = time()
+        if not self.doc_id:
+            self.doc_title = f"{datetime.now().strftime('%m/%d')} - 중국어 정리"
+            doc = self.docs_service.documents().create(body={'title': self.doc_title}).execute()
+            self.doc_id = doc.get('documentId')
+        else:
+            doc = self.docs_service.documents().get(documentId=self.doc_id).execute()
+            self.doc_title = doc.get('title')
 
-            safe_doc_title = self.doc_title.replace('/', '-').replace(' ', '_') + f"-{self.now_time}"
-            sheet_title = f"Chinese_{self.today}_from_{safe_doc_title}"
-            sheet_id, sheet_name, sheet_gid = self.create_sheet(sheet_title)
-            try:
-                lines = self.extract_lines_from_doc()
-            except Exception as e:
-                print(f"❌ 문서를 불러올 수 없습니다: {e}")
-                return
-            
-            self.write_to_sheet(sheet_id, sheet_name, lines)
-            self.resize_columns(sheet_id, sheet_gid)
-            self.create_keyword_sheet(sheet_title, lines)
-            self.save_meta(sheet_id, sheet_title)
+        safe_doc_title = self.doc_title.replace('/', '-').replace(' ', '_') + f"-{self.now_time}"
+        sheet_title = f"Chinese_{self.today}_from_{safe_doc_title}"
+        sheet_id, sheet_name, sheet_gid = self.create_sheet(sheet_title)
+        try:
+            lines = self.extract_lines_from_doc()
+        except Exception as e:
+            print(f"❌ 문서를 불러올 수 없습니다: {e}")
+            return
+        self.write_to_sheet(sheet_id, sheet_name, lines)
+        self.resize_columns(sheet_id, sheet_gid)
+        self.create_keyword_sheet(sheet_title, lines)
+        self.save_meta(sheet_id, sheet_title)
 
-            print(f"✅ 문장 {len(lines)}개 처리 완료")
-            print(f"📄 Docs: https://docs.google.com/document/d/{self.doc_id}/edit")
-            print(f"📊 Sheet: https://docs.google.com/spreadsheets/d/{sheet_id}/edit")
-            with open('history.log', 'a') as log:
-                log.write(f"{datetime.now()} - {self.doc_title} → {sheet_title} | 문장: {len(lines)}")
-            print(f"⏱️ 처리 시간: {round(time() - start, 2)}초")
+        print(f"✅ 문장 {len(lines)}개 처리 완료")
+        print(f"📄 Docs: https://docs.google.com/document/d/{self.doc_id}/edit")
+        print(f"📊 Sheet: https://docs.google.com/spreadsheets/d/{sheet_id}/edit")
+        with open('history.log', 'a') as log:
+            log.write(f"{datetime.now()} - {self.doc_title} → {sheet_title} | 문장: {len(lines)}\n")
+        print(f"⏱️ 처리 시간: {round(time() - start, 2)}초")
+
 
 if __name__ == '__main__':
-    use_existing = input("기존에 docs가 있습니까? (y/n): ").strip().lower()
-    doc_id = None
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--mode', default='default', help='작업 모드: default | regen-pinyin')
+    parser.add_argument('--doc-id', help='문서 ID (기본 모드 전용)')
+    parser.add_argument('--sheet-id', help='시트 ID (regen-pinyin 모드 전용)')
+    args = parser.parse_args()
 
-    if use_existing == 'y':
-        doc_id = input("문서 ID를 입력하세요: ").strip()
+    if args.mode == 'regen-pinyin':
+        sheet_id = args.sheet_id or input("시트 ID를 입력하세요: ").strip()
+        bot = HanyuRecapSheet()
+        bot.regenerate_pinyin_only(sheet_id)
 
-    bot = HanyuRecapSheet(doc_id=doc_id)
-    bot.run()
+    else:
+        use_existing = input("기존에 docs가 있습니까? (y/n): ").strip().lower()
+        doc_id = None
+
+        if use_existing == 'y':
+            doc_id = input("문서 ID를 입력하세요: ").strip()
+
+        bot = HanyuRecapSheet(doc_id=doc_id)
+        bot.run()

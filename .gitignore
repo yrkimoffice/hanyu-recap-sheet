@@ -16,3 +16,5 @@ __pycache__/
 # 기타
 .env
 .DS_Store
+history.log
+history.log
