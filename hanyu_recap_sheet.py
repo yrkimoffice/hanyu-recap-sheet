@@ -1,5 +1,7 @@
 import argparse
 import os
+import time
+import random
 import json
 import re
 import jieba
@@ -11,7 +13,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from pypinyin import pinyin, Style
 from deep_translator import GoogleTranslator
-from time import time
+from time import time as now_time
 
 SCOPES = [
     'https://www.googleapis.com/auth/drive',
@@ -149,6 +151,73 @@ class HanyuRecapSheet:
         self.write_to_sheet(sheet_id, sheet_name, keyword_data)
         self.resize_columns(sheet_id, sheet_gid)
 
+    def create_review_sheet_from_drive(self, mode="count", per_sheet=3):
+        assert mode in ["all", "count"], "mode must be 'all' or 'count'"
+
+        def find_chinese_spreadsheets():
+            result = self.drive_service.files().list(
+                q="name contains 'chinese_' and mimeType='application/vnd.google-apps.spreadsheet' and trashed = false",
+                spaces='drive',
+                fields='files(id, name)'
+            ).execute()
+            return result.get("files", [])
+
+        def get_sheet_names(spreadsheet_id):
+            metadata = self.sheets_service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+            return [s["properties"]["title"] for s in metadata["sheets"]]
+
+        def get_rows(spreadsheet_id, sheet_name):
+            result = self.sheets_service.spreadsheets().values().get(
+                spreadsheetId=spreadsheet_id,
+                range=f"{sheet_name}!A2:C"
+            ).execute()
+            return result.get("values", [])
+
+        chinese_files = find_chinese_spreadsheets()
+        total_files = len(chinese_files)
+        all_rows = []
+
+        print(f"\n📦 총 {total_files}개 문서에서 복습 데이터를 수집합니다...")
+        confirm = input("진행할까요? (y/n): ").strip().lower()
+        if confirm != "y":
+            print("❌ 작업을 취소했습니다.")
+            return
+
+        for i, file in enumerate(chinese_files):
+            print(f"\n📄 [{i+1}/{total_files}] 문서: {file['name']}")
+            for sheet in get_sheet_names(file['id']):
+                print(f"   ⤷ 시트: {sheet} ... ", end="", flush=True)
+                try:
+                    rows = get_rows(file['id'], sheet)
+                    if not rows:
+                        print("건너뜀 (비어있음)")
+                        continue
+                    if mode == "all":
+                        all_rows.extend(rows)
+                    elif mode == "count":
+                        sampled = random.sample(rows, min(per_sheet, len(rows)))
+                        all_rows.extend(sampled)
+                    print(f"✓ {len(rows)}줄 처리됨")
+                    time.sleep(1)
+                except Exception as e:
+                    print(f"⚠️ 오류 발생: {e}")
+
+        if not all_rows:
+            print("❗ 수집된 문장이 없습니다. 작업을 종료합니다.")
+            return
+
+        random.shuffle(all_rows)
+        today = datetime.now().strftime("%m%d")
+        review_title = f"review_{today}"
+        sheet_id, sheet_name, sheet_gid = self.create_sheet(review_title)
+        self.write_to_sheet(sheet_id, sheet_name, all_rows)
+        self.resize_columns(sheet_id, sheet_gid)
+
+        print(f"\n✅ 랜덤 복습 시트가 생성되었습니다! 총 {len(all_rows)}개 문장")
+        print(f"📊 Sheet: https://docs.google.com/spreadsheets/d/{sheet_id}/edit")
+
+    
+    
     def save_meta(self, sheet_id, sheet_title):
         with open('meta.json', 'w') as f:
             json.dump({
@@ -181,7 +250,7 @@ class HanyuRecapSheet:
         print(f"✅ 병음만 {len(updates)}줄 업데이트 완료")
 
     def run(self):
-        start = time()
+        start = now_time()
         if not self.doc_id:
             self.doc_title = f"{datetime.now().strftime('%m/%d')} - 중국어 정리"
             doc = self.docs_service.documents().create(body={'title': self.doc_title}).execute()
@@ -208,7 +277,7 @@ class HanyuRecapSheet:
         print(f"📊 Sheet: https://docs.google.com/spreadsheets/d/{sheet_id}/edit")
         with open('history.log', 'a') as log:
             log.write(f"{datetime.now()} - {self.doc_title} → {sheet_title} | 문장: {len(lines)}\n")
-        print(f"⏱️ 처리 시간: {round(time() - start, 2)}초")
+        print(f"⏱️ 처리 시간: {round(now_time() - start, 2)}초")
 
 
 if __name__ == '__main__':
