@@ -231,8 +231,18 @@ class HanyuRecapSheet:
         if not rows:
             print("⚠️ 해당 시트에 복습할 문장이 없습니다.")
             return
+        
+        rows = [
+            row for row in rows
+            if row and any(cell.strip() for cell in row if isinstance(cell, str))
+        ]
+
+        if not rows:
+            print("⚠️ 유효한 문장이 하나도 없습니다. 시트가 비어있을 수 있어요.")
+            return
 
         random.shuffle(rows)
+
         if sample_count:
             rows = rows[:sample_count]
 
